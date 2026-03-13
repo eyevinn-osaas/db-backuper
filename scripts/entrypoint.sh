@@ -9,6 +9,11 @@ S3_SECRET_KEY="${S3_SECRET_KEY:?S3_SECRET_KEY env var is required}"
 S3_BUCKET="${S3_BUCKET:?S3_BUCKET env var is required}"
 S3_KEY="${S3_KEY:?S3_KEY env var is required}"
 
+# URL-decode a string (e.g. %21 -> !, %40 -> @)
+urldecode() {
+  printf '%b' "${1//%/\\x}"
+}
+
 # Parse DATABASE_URL scheme to determine database type
 DB_SCHEME="${DATABASE_URL%%://*}"
 
@@ -20,8 +25,8 @@ if [[ "$URL_REMAINDER" == *@* ]]; then
   CREDENTIALS="${URL_REMAINDER%%@*}"
   HOST_PART="${URL_REMAINDER#*@}"
   if [[ "$CREDENTIALS" == *:* ]]; then
-    export DB_USER="${CREDENTIALS%%:*}"
-    export DB_PASSWORD="${CREDENTIALS#*:}"
+    export DB_USER="$(urldecode "${CREDENTIALS%%:*}")"
+    export DB_PASSWORD="$(urldecode "${CREDENTIALS#*:}")"
   else
     export DB_USER="$CREDENTIALS"
     export DB_PASSWORD=""
