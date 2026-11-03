@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=error-trap.sh
+. "${SCRIPT_DIR}/error-trap.sh"
+RESTORE_STEP="restore"
+
 DATABASE="${DB_NAME:-default}"
 
 echo "Starting ClickHouse restore: ${DB_HOST}:${DB_PORT}/${DATABASE}"

@@ -11,7 +11,26 @@ RUN git clone --depth 1 --branch ${MC_TAG} https://github.com/minio/mc /src/mc \
          -X github.com/minio/mc/cmd.CommitID=${MC_COMMIT} \
          -X github.com/minio/mc/cmd.CopyrightYear=2025" .
 
+# The valkey loader is built from the exact fork commit the OSC catalog
+# valkey-io-valkey image runs in prod (eyevinn-osaas/valkey unstable, RDB 12).
+# It is pinned because official Valkey/Redis images cannot read these backups:
+# Valkey 7.2-8.1 use RDB 11 and 9.0 uses RDB 80.
+FROM debian:bookworm AS valkey-build
+ARG VALKEY_COMMIT=bcb5842925f7c64e4b7a98f0b72891b61730817a
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git init /src/valkey \
+    && cd /src/valkey \
+    && git fetch --depth 1 https://github.com/eyevinn-osaas/valkey ${VALKEY_COMMIT} \
+    && git checkout FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${VALKEY_COMMIT}" \
+    && make -j"$(nproc)" BUILD_TLS=no
+
 FROM debian:bookworm-slim
+
+ARG VALKEY_COMMIT=bcb5842925f7c64e4b7a98f0b72891b61730817a
+ENV DB_BACKUPER_VALKEY_LOADER_COMMIT=${VALKEY_COMMIT}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -50,6 +69,10 @@ RUN curl -fsSL https://clickhouse.com/ | sh && \
 
 # Minio client (mc) for S3 operations
 COPY --from=mc-build /out/mc /usr/local/bin/mc
+
+# Valkey loader and CLI used by restore-valkey.sh
+COPY --from=valkey-build /src/valkey/src/valkey-server /usr/local/bin/valkey-server
+COPY --from=valkey-build /src/valkey/src/valkey-cli /usr/local/bin/valkey-cli
 
 COPY scripts/ /opt/backup/
 RUN chmod +x /opt/backup/*.sh
