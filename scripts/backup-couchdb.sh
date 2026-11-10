@@ -19,13 +19,20 @@ if [ -n "${DB_NAME:-}" ]; then
 else
   # All databases backup
   DBS=$(curl -sf "${BASE_URL}/_all_dbs" | jq -r '.[] | select(startswith("_") | not)') || { echo "ERROR: Failed to list databases" >&2; exit 2; }
-  RESULT="{}"
+  # Document data never goes through argv: one argument is capped at 128 KiB (MAX_ARG_STRLEN).
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  PARTS=("/dev/null")
+  i=0
   for DB in ${DBS}; do
     echo "Backing up database: ${DB}"
-    DOCS=$(curl -sf "${BASE_URL}/${DB}/_all_docs?include_docs=true") || { echo "ERROR: Failed to dump ${DB}" >&2; exit 2; }
-    RESULT=$(echo "${RESULT}" | jq --arg db "$DB" --argjson docs "$DOCS" '. + {($db): $docs}')
+    i=$((i + 1))
+    curl -sf "${BASE_URL}/${DB}/_all_docs?include_docs=true" -o "${TMP}/raw.json" || { echo "ERROR: Failed to dump ${DB}" >&2; exit 2; }
+    jq -c --arg db "$DB" '{($db): .}' "${TMP}/raw.json" > "${TMP}/${i}.json" || { echo "ERROR: Failed to dump ${DB}" >&2; exit 2; }
+    rm -f "${TMP}/raw.json"
+    PARTS+=("${TMP}/${i}.json")
   done
-  echo "${RESULT}" | gzip > "${DUMP_FILE}"
+  jq -c -s 'add // {}' "${PARTS[@]}" | gzip > "${DUMP_FILE}"
 fi
 
 DUMP_SIZE=$(stat -c%s "${DUMP_FILE}" 2>/dev/null || stat -f%z "${DUMP_FILE}")

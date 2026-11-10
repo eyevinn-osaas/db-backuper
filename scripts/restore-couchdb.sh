@@ -38,10 +38,13 @@ if [ -n "${DB_NAME:-}" ]; then
   curl -sf -X PUT "${BASE_URL}/${DB_NAME}" 2>/dev/null || true
 
   # Extract docs and strip _rev for clean insert
-  DOCS=$(jq '{docs: [.rows[].doc | del(._rev)]}' "${DUMP_FILE}")
+  # The body goes through a file: one argument is capped at 128 KiB, so curl -d "$VAR" fails on large databases.
+  BODY=$(mktemp)
+  jq -c '{docs: [.rows[].doc | del(._rev)]}' "${DUMP_FILE}" > "${BODY}"
   curl -sf -X POST "${BASE_URL}/${DB_NAME}/_bulk_docs" \
     -H "Content-Type: application/json" \
-    -d "${DOCS}" > /dev/null || { echo "ERROR: _bulk_docs failed for ${DB_NAME}" >&2; exit 5; }
+    --data-binary @"${BODY}" > /dev/null || { rm -f "${BODY}"; echo "ERROR: _bulk_docs failed for ${DB_NAME}" >&2; exit 5; }
+  rm -f "${BODY}"
 else
   # Multi-database restore
   # Read the list in an assignment: a failure inside a for-loop word list is ignored by set -e.
@@ -54,10 +57,12 @@ else
     curl -sf -X PUT "${BASE_URL}/${DB}" 2>/dev/null || true
 
     # Extract docs for this database
-    DOCS=$(jq --arg db "$DB" '{docs: [.[$db].rows[].doc | del(._rev)]}' "${DUMP_FILE}")
+    BODY=$(mktemp)
+    jq -c --arg db "$DB" '{docs: [.[$db].rows[].doc | del(._rev)]}' "${DUMP_FILE}" > "${BODY}"
     curl -sf -X POST "${BASE_URL}/${DB}/_bulk_docs" \
       -H "Content-Type: application/json" \
-      -d "${DOCS}" > /dev/null || { echo "ERROR: _bulk_docs failed for ${DB}" >&2; exit 5; }
+      --data-binary @"${BODY}" > /dev/null || { rm -f "${BODY}"; echo "ERROR: _bulk_docs failed for ${DB}" >&2; exit 5; }
+    rm -f "${BODY}"
   done
 fi
 

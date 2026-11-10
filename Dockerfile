@@ -1,3 +1,11 @@
+# Pinned ClickHouse client (vendor release asset, SHA-256 verified at build time).
+# Upstream publishes SHA-512 only; the SHA-256 values below were computed from the
+# release assets (which were first checked against the published .sha512 files).
+ARG CLICKHOUSE_VERSION=26.3.60.2
+ARG CLICKHOUSE_TAG=v26.3.60.2-lts
+ARG CLICKHOUSE_SHA256_AMD64=507593f610c009f8b51214948f88134550913189a553a6a0c52fc0e4730aa371
+ARG CLICKHOUSE_SHA256_ARM64=effeb080bf4c9339dcd3c76b3a331f1c895ad7ca8314a7a94a2c06dfb56d0b83
+
 FROM golang:1.23.10-bookworm AS mc-build
 ARG MC_TAG=RELEASE.2025-08-13T08-35-41Z
 ARG MC_COMMIT=7394ce0dd2a80935aded936b09fa12cbb3cb8096
@@ -62,10 +70,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# ClickHouse client (static binary)
-RUN curl -fsSL https://clickhouse.com/ | sh && \
-    mv clickhouse /usr/local/bin/clickhouse && \
-    ln -s /usr/local/bin/clickhouse /usr/local/bin/clickhouse-client
+# ClickHouse client (pinned static binary from the vendor release, checksum verified)
+ARG TARGETARCH
+ARG CLICKHOUSE_VERSION
+ARG CLICKHOUSE_TAG
+ARG CLICKHOUSE_SHA256_AMD64
+ARG CLICKHOUSE_SHA256_ARM64
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) CH_SHA256="${CLICKHOUSE_SHA256_AMD64}" ;; \
+      arm64) CH_SHA256="${CLICKHOUSE_SHA256_ARM64}" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    CH_PKG="clickhouse-common-static-${CLICKHOUSE_VERSION}-${TARGETARCH:-amd64}.tgz"; \
+    curl -fsSL -o "/tmp/${CH_PKG}" \
+      "https://github.com/ClickHouse/ClickHouse/releases/download/${CLICKHOUSE_TAG}/${CH_PKG}"; \
+    echo "${CH_SHA256}  /tmp/${CH_PKG}" | sha256sum -c -; \
+    tar -xzf "/tmp/${CH_PKG}" -C /tmp --strip-components=3 \
+      "clickhouse-common-static-${CLICKHOUSE_VERSION}/usr/bin/clickhouse"; \
+    install -m 0755 /tmp/clickhouse /usr/local/bin/clickhouse; \
+    rm -f /tmp/clickhouse "/tmp/${CH_PKG}"; \
+    ln -s /usr/local/bin/clickhouse /usr/local/bin/clickhouse-client; \
+    clickhouse client --version | grep -F "${CLICKHOUSE_VERSION}"
 
 # Minio client (mc) for S3 operations
 COPY --from=mc-build /out/mc /usr/local/bin/mc
